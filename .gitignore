@@ -1,4 +1,8 @@
 data/
+__pycache__/
 
 *.tif
 *.tiff
+*.npy
+*.ipynb_checkpoints
+*.pyc
