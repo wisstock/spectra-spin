@@ -62,6 +62,7 @@ class SpectralAnalyzer:
 
     def __init__(self,
                  crop: Optional[tuple[int, int, int, int]] = None,
+                 spectral_band_width:int = 100,
                  custom_lines_num: bool = False,
                  lines_num: int = 25,
                  mask_width: int = 60,
@@ -70,6 +71,7 @@ class SpectralAnalyzer:
                  dist_up: Optional[float] = None,
                  dist_down: Optional[float] = None) -> None:
         self.crop = crop
+        self.spectral_band_width = spectral_band_width
         self.custom_lines_num = custom_lines_num
         self.lines_num = lines_num
         self.mask_width = mask_width
@@ -165,7 +167,9 @@ class SpectralAnalyzer:
 
 
     @staticmethod
-    def extract_spectral_bands(image: np.ndarray, regularized_lines: dict) -> np.ndarray:
+    def extract_spectral_bands(image: np.ndarray,
+                               regularized_lines: dict,
+                               spectral_width) -> np.ndarray:
         """Extract spectral bands from the raw image using regularized
         boundaries.
 
@@ -185,7 +189,7 @@ class SpectralAnalyzer:
         up_lim = regularized_lines['dark_up'].T
         down_lim = regularized_lines['dark_down'].T
 
-        spectral_width = int(up_lim[0, 0] - down_lim[0, 0])
+        # spectral_width = int(up_lim[0, 0] - down_lim[0, 0])
 
         lambda_img = np.zeros((up_lim.shape[1], up_lim.shape[0], spectral_width),
                             dtype=np.float32) # shape: (num_bands, img_cols, spectral_width)
@@ -200,15 +204,17 @@ class SpectralAnalyzer:
                 for col in range(image.shape[1]):
                     up_idx = up_lim[col, band]
                     dn_idx = down_lim[col, band]
-                    band_row = image[dn_idx:up_idx, col]
-                    if band_row.shape[0] > spectral_width:
-                        band_row = band_row[:spectral_width]
-                        bad_lines += 1   
-                    elif band_row.shape[0] < spectral_width:
-                        band_row = np.pad(band_row, pad_width=(0,spectral_width-band_row.shape[0]),
-                                        mode='constant', constant_values=(0))
-                        bad_lines += 1
-                    lambda_img[band, col] = band_row
+                    # band_row = image[dn_idx:up_idx, col]
+                    # if band_row.shape[0] > spectral_width:
+                    #     band_row = band_row[:spectral_width]
+                    #     bad_lines += 1   
+                    # elif band_row.shape[0] < spectral_width:
+                    #     band_row = np.pad(band_row, pad_width=(0,spectral_width-band_row.shape[0]),
+                    #                     mode='constant', constant_values=(0))
+                    #     bad_lines += 1
+                    lambda_img[band, col] = np.pad(image[dn_idx:up_idx, col],
+                                                   pad_width=(0,spectral_width-(up_idx-dn_idx)),
+                                                   mode='constant', constant_values=(0))
         print(outligher_lines, bad_lines)
         print(f'Out the frame bands number: {outligher_lines}')
         return lambda_img
@@ -390,7 +396,7 @@ class SpectralAnalyzer:
         edges =  ndi.prewitt(image, axis=0)
         structures = self.detect_structures(edges)
         reg_lines = self.regularize_structures(structures)
-        bands = self.extract_spectral_bands(image, reg_lines)
+        bands = self.extract_spectral_bands(image, reg_lines, self.spectral_band_width)
         spectral_img = self.allocate_spectral_pixels(image, reg_lines, bands)
         return spectral_img
 
