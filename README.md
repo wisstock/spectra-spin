@@ -25,7 +25,7 @@ hyperspectral data cube `(height, width, spectral_channels)`.
 - [API Reference](#api-reference)
   - [Class `SpectralAnalyzer`](#class-spectralanayzer)
   - [Function `reconstruct_spectral_image`](#function-reconstruct_spectral_image)
-- [CLI Usage](#cli-usage)
+
 - [Project Structure](#project-structure)
 - [AI Disclaimer](#ai-disclaimer)
 - [License](#license)
@@ -221,16 +221,6 @@ spectral_img = reconstruct_spectral_image(
 )
 ```
 
-### Command-line usage
-
-```bash
-python batch.py data/SD_QD_mix/*.tiff \
-    --crop 500 2500 1000 2500 \
-    --dist-up 30 --dist-down 50 \
-    --method mean \
-    -o spectral_image.npy
-```
-
 ---
 
 ## API Reference
@@ -343,64 +333,13 @@ and calls `process_batch`.  All parameters mirror the class constructor plus the
 
 ---
 
-## CLI Usage
 
-```
-usage: batch.py [-h] [--crop ROW0 ROW1 COL0 COL1]
-                [--mask-width MASK_WIDTH] [--smooth-factor SMOOTH_FACTOR]
-                [--dist-up DIST_UP] [--dist-down DIST_DOWN]
-                [--method {mean,sum,median}] [-o OUTPUT]
-                images [images ...]
-
-Batch spectral image reconstruction from spinning-disk spectral microscopy data.
-
-positional arguments:
-  images                Input image file paths (shell globs are expanded).
-
-options:
-  -h, --help            show this help message and exit
-  --crop ROW0 ROW1 COL0 COL1
-                        ROI crop: row_start row_end col_start col_end
-  --mask-width MASK_WIDTH
-                        DP depletion mask half-width (default: 20)
-  --smooth-factor SMOOTH_FACTOR
-                        B-spline smoothing factor (default: 1e5)
-  --dist-up DIST_UP     Fixed upward boundary distance (default: auto)
-  --dist-down DIST_DOWN
-                        Fixed downward boundary distance (default: auto)
-  --method {mean,sum,median}
-                        Accumulation method across images (default: mean)
-  -o, --output OUTPUT   Output .npy file (default: spectral_image.npy)
-```
-
-### Examples
-
-Process all images in a directory, average them, and save the result:
-
-```bash
-python batch.py data/SD_QD_mix/*.tiff \
-    --crop 500 2500 1000 2500 \
-    --dist-up 30 --dist-down 50 \
-    --method mean \
-    -o result.npy
-```
-
-Process a specific subset of images:
-
-```bash
-python batch.py data/SD_QD_mix/image_0001.tiff data/SD_QD_mix/image_0002.tiff \
-    --crop 500 2500 1000 2500 \
-    --method median \
-    -o median_result.npy
-```
-
----
 
 ## Project Structure
 
 ```
 spectra-spin/
-├── batch.py          # Production script — SpectralAnalyzer class & CLI
+├── batch.py          # Production module — SpectralAnalyzer class & API
 ├── demo.ipynb        # Interactive prototype / exploratory notebook
 ├── data/
 │
@@ -413,8 +352,8 @@ spectra-spin/
 
 The initial algorithm prototype was developed interactively in the Jupyter
 notebook `demo.ipynb`.  The refactoring of this exploratory code into the
-structured, class-based production script `batch.py` — including the design of
-the `SpectralAnalyzer` class API, documentation, type annotations, CLI interface,
+structured, class-based production module `batch.py` — including the design of
+the `SpectralAnalyzer` class API, documentation, type annotations,
 and batch accumulation logic — was performed with the assistance of **AI-based
 coding tools**.  All algorithmic logic faithfully reproduces the original notebook
 implementation; no modifications to the core numerical procedures were introduced
