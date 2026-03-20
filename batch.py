@@ -10,18 +10,16 @@ input images into a single accumulated spectral image.
 
 Usage
 -----
-As a library::
+As a package::
 
-    from batch import SpectralAnalyzer, reconstruct_spectral_image
+    from batch import SpectralAnalyzer
 
     analyzer = SpectralAnalyzer(crop=(500, 2500, 1000, 2500),
                                 dist_up=30, dist_down=50)
     spectral_img = analyzer.process_single("image.tiff")
 
     # or batch:
-    spectral_img = reconstruct_spectral_image(
-        ["img1.tiff", "img2.tiff"], crop=(500, 2500, 1000, 2500),
-        dist_up=30, dist_down=50, method="mean")
+    spectral_img = analyzer.process_batch(["img1.tiff", "img2.tiff"])
 
 """
 
@@ -62,17 +60,21 @@ class SpectralAnalyzer:
         automatically.
     """
 
-    def __init__(
-        self,
-        crop: Optional[tuple[int, int, int, int]] = None,
-        mask_width: int = 20,
-        smooth_factor: float = 1e5,
-        dist_up: Optional[float] = None,
-        dist_down: Optional[float] = None,
-    ) -> None:
+    def __init__(self,
+                 crop: Optional[tuple[int, int, int, int]] = None,
+                 custom_lines_num: bool = False,
+                 lines_num: int = 25,
+                 mask_width: int = 60,
+                 smooth_factor: float = 1e5,
+                 custom_dist: bool = True,
+                 dist_up: Optional[float] = None,
+                 dist_down: Optional[float] = None) -> None:
         self.crop = crop
+        self.custom_lines_num = custom_lines_num
+        self.lines_num = lines_num
         self.mask_width = mask_width
         self.smooth_factor = smooth_factor
+        self.custom_dist = custom_dist
         self.dist_up = dist_up
         self.dist_down = dist_down
 
@@ -127,28 +129,28 @@ class SpectralAnalyzer:
             ptr = np.zeros_like(img_work, dtype=np.int32)
 
             for j in range(1, cols):
-                v_up = np.pad(acc[:-1, j - 1], (1, 0),
+                v_up = np.pad(acc[:-1, j-1], (1, 0),
                               constant_values=pad_val)
-                v_st = acc[:, j - 1]
-                v_dn = np.pad(acc[1:, j - 1], (0, 1),
+                v_st = acc[:, j-1]
+                v_dn = np.pad(acc[1:, j-1], (0, 1),
                               constant_values=pad_val)
 
                 stacked = np.stack([v_up, v_st, v_dn])
 
                 if is_dark:
-                    acc[:, j] = img_work[:, j] + np.min(stacked, axis=0)
-                    ptr[:, j] = np.argmin(stacked, axis=0) - 1
+                    acc[:,j] = img_work[:, j] + np.min(stacked, axis=0)
+                    ptr[:,j] = np.argmin(stacked, axis=0)-1
                 else:
-                    acc[:, j] = img_work[:, j] + np.max(stacked, axis=0)
-                    ptr[:, j] = np.argmax(stacked, axis=0) - 1
+                    acc[:,j] = img_work[:, j] + np.max(stacked, axis=0)
+                    ptr[:,j] = np.argmax(stacked, axis=0)-1
 
             path = np.zeros(cols, dtype=np.int32)
             path[-1] = (np.argmin(acc[:, -1]) if is_dark
                         else np.argmax(acc[:, -1]))
 
-            for j in range(cols - 1, 0, -1):
+            for j in range(cols-1, 0, -1):
                 cur = path[j]
-                path[j - 1] = np.clip(cur + ptr[cur, j], 0, rows - 1)
+                path[j-1] = np.clip(cur+ptr[cur, j], 0, rows-1)
 
             lines[line_idx] = path
 
@@ -180,28 +182,36 @@ class SpectralAnalyzer:
             3-D array of shape ``(num_bands, image_width, spectral_width)``
             containing the collapsed spectral data.
         """
-        up_lim = regularized_lines['dark_up'].T     # (cols, num_bands)
-        down_lim = regularized_lines['dark_down'].T  # (cols, num_bands)
+        up_lim = regularized_lines['dark_up'].T
+        down_lim = regularized_lines['dark_down'].T
 
         spectral_width = int(up_lim[0, 0] - down_lim[0, 0])
-        num_bands = up_lim.shape[1]
-        img_cols = image.shape[1]
 
-        lambda_cube = np.moveaxis(
-            np.zeros((img_cols, num_bands, spectral_width), dtype=np.float32),
-            0, 1,
-        )  # shape: (num_bands, img_cols, spectral_width)
+        lambda_img = np.zeros((up_lim.shape[1], up_lim.shape[0], spectral_width),
+                            dtype=np.float32) # shape: (num_bands, img_cols, spectral_width)
 
-        for col in range(img_cols):
-            col_data = image[:, col]
-            for band in range(num_bands - 1):
-                up_idx = up_lim[col, band]
-                dn_idx = down_lim[col, band]
-                strip = col_data[dn_idx:up_idx]
-                if strip.shape[0] == spectral_width:
-                    lambda_cube[band, col] = strip
-
-        return lambda_cube
+        outligher_lines = 0
+        bad_lines = 0
+        for band in range(lambda_img.shape[0]):
+            if np.any(up_lim[:, band]>image.shape[0]) or np.any(down_lim[:, band]<0):
+                outligher_lines += 1
+                continue
+            else:
+                for col in range(image.shape[1]):
+                    up_idx = up_lim[col, band]
+                    dn_idx = down_lim[col, band]
+                    band_row = image[dn_idx:up_idx, col]
+                    if band_row.shape[0] > spectral_width:
+                        band_row = band_row[:spectral_width]
+                        bad_lines += 1   
+                    elif band_row.shape[0] < spectral_width:
+                        band_row = np.pad(band_row, pad_width=(0,spectral_width-band_row.shape[0]),
+                                        mode='constant', constant_values=(0))
+                        bad_lines += 1
+                    lambda_img[band, col] = band_row
+        print(outligher_lines, bad_lines)
+        print(f'Out the frame bands number: {outligher_lines}')
+        return lambda_img
 
 
     @staticmethod
@@ -278,21 +288,21 @@ class SpectralAnalyzer:
             indices of detected structures.
         """
         img_work = ndi.gaussian_filter(edge_image.astype(np.float64),
-                                       sigma=(1.0, 2.0))
-        rows, cols = img_work.shape
+                                       sigma=(1.5, 2.5))
+        
+        if self.custom_lines_num:
+            num_lines = self.lines_num
+            print(f'Custom lines number: {num_lines}')
+        else:
+            num_lines = self._estimate_num_lines(img_work)
+            print(f'Estimated lines number: {num_lines}')
 
-        num_lines = self._estimate_num_lines(img_work)
-
-        mask_width = self.mask_width
-
-        return {
-            'light': self._extract_paths(img_work.copy(), num_lines,
-                                         is_dark=False,
-                                         mask_width=mask_width),
-            'dark':  self._extract_paths(img_work.copy(), num_lines,
-                                         is_dark=True,
-                                         mask_width=mask_width),
-        }
+        return {'light': self._extract_paths(img_work.copy(), num_lines,
+                                             is_dark=False,
+                                             mask_width=self.mask_width),
+                'dark':  self._extract_paths(img_work.copy(), num_lines,
+                                             is_dark=True,
+                                             mask_width=self.mask_width)}
 
 
     def regularize_structures(self, detected_lines: dict) -> dict:
@@ -327,7 +337,7 @@ class SpectralAnalyzer:
         dist_up = self.dist_up
         dist_down = self.dist_down
 
-        if dist_up is None or dist_down is None:
+        if dist_up is None or dist_down is None or self.custom_dist is False:
             est_up, est_down = [], []
             for l_line in splined_light:
                 dists = np.array([d_line - l_line for d_line in dark_lines])
@@ -341,9 +351,9 @@ class SpectralAnalyzer:
                 if len(below) > 0:
                     est_down.append(np.min(below))
 
-            if dist_up is None:
+            if dist_up is None or self.custom_dist is False:
                 dist_up = float(np.median(est_up)) if est_up else 10.0
-            if dist_down is None:
+            if dist_down is None or self.custom_dist is False:
                 dist_down = float(np.median(est_down)) if est_down else 10.0
 
         num_light = len(splined_light)
@@ -385,7 +395,7 @@ class SpectralAnalyzer:
         return spectral_img
 
 
-    def process_batch(self, image_paths: list[str], method: str = 'mean') -> np.ndarray:
+    def process_batch(self, image_paths: list[str]) -> np.ndarray:
         """Process multiple images and accumulate them into a single
         reconstructed spectral image.
 
@@ -406,67 +416,17 @@ class SpectralAnalyzer:
         if not image_paths:
             raise ValueError("image_paths must be a non-empty list")
 
-        allowed = {'mean', 'sum', 'median'}
-        if method not in allowed:
-            raise ValueError(
-                f"Unknown method '{method}'; choose from {allowed}"
-            )
-
         results: list[np.ndarray] = []
+        s_w = []
         for idx, path in enumerate(image_paths, 1):
             print(f"[{idx}/{len(image_paths)}] Processing {os.path.basename(path)} ...")
-            results.append(self.process_single(path))
+            single_result = self.process_single(path)
+            s_w.append(single_result.shape[-1]) 
+            results.append(single_result)
+
+        s_w = np.asarray(s_w, dtype=int)
+        print(f'Batch spectral width: min {np.min(s_w)}, max {np.max(s_w)}')
 
         stack = np.stack(results, axis=0)  # (N, H, W, S)
 
-        if method == 'mean':
-            return np.mean(stack, axis=0).astype(np.float32)
-        elif method == 'sum':
-            return np.sum(stack, axis=0).astype(np.float32)
-        else:  # median
-            return np.median(stack, axis=0).astype(np.float32)
-
-
-
-
-def reconstruct_spectral_image(image_paths: list[str],
-                               crop: Optional[tuple[int, int, int, int]] = None,
-                               mask_width: int = 20,
-                               smooth_factor: float = 1e5,
-                               dist_up: Optional[float] = None,
-                               dist_down: Optional[float] = None,
-                               method: str = 'mean') -> np.ndarray:
-    """One-call convenience function for batch spectral image reconstruction.
-
-    Creates a ``SpectralAnalyzer`` with the given parameters and runs
-    ``process_batch`` on the supplied list of image paths.
-
-    Parameters
-    ----------
-    image_paths : list of str
-        Paths to input image files.
-    crop : tuple of int, optional
-        ``(row_start, row_end, col_start, col_end)`` ROI crop.
-    mask_width : int
-        DP depletion mask half-width.
-    smooth_factor : float
-        B-spline smoothing factor.
-    dist_up, dist_down : float or None
-        Fixed band boundary distances; ``None`` → auto-estimated.
-    method : str
-        Accumulation method (``'mean'``, ``'sum'``, or ``'median'``).
-
-    Returns
-    -------
-    np.ndarray
-        Accumulated spectral image of shape
-        ``(height, width, spectral_width)``.
-    """
-    analyzer = SpectralAnalyzer(
-        crop=crop,
-        mask_width=mask_width,
-        smooth_factor=smooth_factor,
-        dist_up=dist_up,
-        dist_down=dist_down,
-    )
-    return analyzer.process_batch(image_paths, method=method)
+        return np.sum(stack, axis=0).astype(np.float32)
