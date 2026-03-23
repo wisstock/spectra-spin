@@ -1,8 +1,19 @@
-data/
-__pycache__/
+# legacy
+diff/
 
+# data
+data/
 *.tif
 *.tiff
+
+#metadata
+*.npz
+*.json
+*.yaml
+*.yml
+
+#temp
+__pycache__/
 *.npy
 *.ipynb_checkpoints
 *.pyc
