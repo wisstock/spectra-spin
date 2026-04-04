@@ -185,78 +185,143 @@ def _interpolate_missing_zeros_numba(img3d: np.ndarray) -> np.ndarray:
 
 
 @njit
-def _box_blur_h(src: np.ndarray, dst: np.ndarray, r: int):
-    rows, cols = src.shape
-    for i in range(rows):
-        w_sum = 0.0
-        for k in range(-r, r):
-            idx = max(0, min(cols-1, k))
-            w_sum += src[i, idx]
-        for j in range(cols):
-            right_idx = max(0, min(cols-1, j + r))
-            left_idx = max(0, min(cols-1, j - r - 1))
-            w_sum += src[i, right_idx]
-            dst[i, j] = w_sum
-            w_sum -= src[i, left_idx]
+def _interp_1d_fill(profile: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Linear interpolation over non-zero values in a 1D profile.
+    Returns the interpolated profile (same length), or zeros if no data."""
+    n = profile.shape[0]
+    nnz = 0
+    for i in range(n):
+        if profile[i] != 0:
+            nnz += 1
+    if nnz == 0:
+        return np.zeros(n, dtype=np.float64)
+    if nnz == 1:
+        val = 0.0
+        for i in range(n):
+            if profile[i] != 0:
+                val = profile[i]
+                break
+        out = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            out[i] = val
+        return out
 
-@njit
-def _box_blur_v(src: np.ndarray, dst: np.ndarray, r: int):
-    rows, cols = src.shape
-    for j in range(cols):
-        w_sum = 0.0
-        for k in range(-r, r):
-            idx = max(0, min(rows-1, k))
-            w_sum += src[idx, j]
-        for i in range(rows):
-            bottom_idx = max(0, min(rows-1, i + r))
-            top_idx = max(0, min(rows-1, i - r - 1))
-            w_sum += src[bottom_idx, j]
-            dst[i, j] = w_sum
-            w_sum -= src[top_idx, j]
+    xp = np.zeros(nnz, dtype=np.float64)
+    fp = np.zeros(nnz, dtype=np.float64)
+    idx = 0
+    for i in range(n):
+        if profile[i] != 0:
+            xp[idx] = i
+            fp[idx] = profile[i]
+            idx += 1
+    return np.interp(x, xp, fp)
 
-@njit
-def _fast_blur_2d(src: np.ndarray, dst: np.ndarray, r: int, passes: int):
-    temp = src.copy()
-    for p in range(passes):
-        _box_blur_h(temp, dst, r)
-        _box_blur_v(dst, temp, r)
-    for i in range(src.shape[0]):
-        for j in range(src.shape[1]):
-            dst[i, j] = temp[i, j]
 
 @njit(parallel=True)
 def _interpolate_missing_zeros_2d_numba(img3d: np.ndarray) -> np.ndarray:
-    """
-    High-quality Scattered Data Interpolation using Normalized Convolution.
-    Applies 3 passes of 2D moving-average box blur to approximate a 
-    smooth Cubic B-Spline Radial Basis Function (RBF).
-    This generates highly continuous, non-linear 2D interpolation, 
-    matching the quality of griddata(method='cubic') but orders of magnitude faster.
+    """Two-pass linear 2D interpolation for missing (zero-valued) pixels.
+
+    Pass 1 — interpolate along rows (axis 1) for each (row, channel).
+    Pass 2 — interpolate along columns (axis 0) for each (col, channel).
+    The final value is the average of the two passes where both provide
+    data; otherwise the available pass is used directly.
+    Zero pixels that cannot be interpolated by either pass stay zero.
     """
     rows, cols, channels = img3d.shape
     out = img3d.copy()
-    r = 25  # Coverage radius per pass
-    
-    for ch in prange(channels):
-        src_data = img3d[:, :, ch].astype(np.float64)
-        src_mask = (src_data != 0).astype(np.float64)
-        
-        dst_data = np.zeros_like(src_data)
-        dst_mask = np.zeros_like(src_mask)
-        
-        # Blur the data and the mask 3 times for cubic smoothness
-        _fast_blur_2d(src_data, dst_data, r, passes=3)
-        _fast_blur_2d(src_mask, dst_mask, r, passes=3)
-        
-        for i in range(rows):
-            for j in range(cols):
-                if src_mask[i, j] == 0:
-                    if dst_mask[i, j] > 1e-8:
-                        # RBF Interpolate: smooth Data sum / smooth Mask sum
-                        out[i, j, ch] = dst_data[i, j] / dst_mask[i, j]
-                    else:
-                        out[i, j, ch] = 0.0
+    x_row = np.arange(cols).astype(np.float64)
+    x_col = np.arange(rows).astype(np.float64)
 
+    for ch in prange(channels):
+        # --- Pass 1: interpolate along rows (horizontal) ---
+        row_interp = np.zeros((rows, cols), dtype=np.float64)
+        row_valid = np.zeros((rows, cols), dtype=np.float64)
+        for r in range(rows):
+            profile = np.zeros(cols, dtype=np.float64)
+            nnz = 0
+            for c in range(cols):
+                profile[c] = img3d[r, c, ch]
+                if profile[c] != 0:
+                    nnz += 1
+            if nnz > 0:
+                filled = _interp_1d_fill(profile, x_row)
+                for c in range(cols):
+                    row_interp[r, c] = filled[c]
+                    row_valid[r, c] = 1.0
+
+        # --- Pass 2: interpolate along columns (vertical) ---
+        col_interp = np.zeros((rows, cols), dtype=np.float64)
+        col_valid = np.zeros((rows, cols), dtype=np.float64)
+        for c in range(cols):
+            profile = np.zeros(rows, dtype=np.float64)
+            nnz = 0
+            for r in range(rows):
+                profile[r] = img3d[r, c, ch]
+                if profile[r] != 0:
+                    nnz += 1
+            if nnz > 0:
+                filled = _interp_1d_fill(profile, x_col)
+                for r in range(rows):
+                    col_interp[r, c] = filled[r]
+                    col_valid[r, c] = 1.0
+
+        # --- Combine: average when both passes valid ---
+        for r in range(rows):
+            for c in range(cols):
+                if img3d[r, c, ch] != 0:
+                    continue  # original data — already in out
+                rv = row_valid[r, c]
+                cv = col_valid[r, c]
+                if rv > 0 and cv > 0:
+                    out[r, c, ch] = (row_interp[r, c] + col_interp[r, c]) / 2.0
+                elif rv > 0:
+                    out[r, c, ch] = row_interp[r, c]
+                elif cv > 0:
+                    out[r, c, ch] = col_interp[r, c]
+                # else: stays 0
+
+    return out
+
+
+@njit(parallel=True)
+def _binning_2d_numba(img3d: np.ndarray, bin_size: int) -> np.ndarray:
+    """Down-sample a 3D image (H, W, S) by averaging non-zero pixels
+    in each (bin_size x bin_size) spatial block.
+
+    Parameters
+    ----------
+    img3d : np.ndarray
+        Input image of shape (rows, cols, channels), dtype float32/64.
+    bin_size : int
+        Side length of the square binning block (must be >= 1).
+
+    Returns
+    -------
+    np.ndarray
+        Down-sampled image of shape (rows // bin_size, cols // bin_size, channels).
+    """
+    rows, cols, channels = img3d.shape
+    out_rows = rows // bin_size
+    out_cols = cols // bin_size
+    out = np.zeros((out_rows, out_cols, channels), dtype=img3d.dtype)
+
+    for ch in prange(channels):
+        for br in range(out_rows):
+            r_start = br * bin_size
+            r_end = r_start + bin_size
+            for bc in range(out_cols):
+                c_start = bc * bin_size
+                c_end = c_start + bin_size
+                total = 0.0
+                count = 0
+                for r in range(r_start, r_end):
+                    for c in range(c_start, c_end):
+                        val = img3d[r, c, ch]
+                        if val != 0.0:
+                            total += val
+                            count += 1
+                if count > 0:
+                    out[br, bc, ch] = total / count
     return out
 
 @dataclass
@@ -271,18 +336,56 @@ class BatchResultNumba(BatchResult):
             self.spectral_img_interpolated = _interpolate_missing_zeros_numba(self.spectral_img)
             print("Interpolation complete.")
         elif method == "2d":
-            print("Starting parallel Numba 2D smooth cubic interpolation...")
+            print("Starting parallel Numba 2D linear interpolation...")
             self.spectral_img_interpolated = _interpolate_missing_zeros_2d_numba(self.spectral_img)
             print("Interpolation complete.")
         else:
             raise ValueError("Unknown method. Use '1d' or '2d'.")
+
+    def apply_output_binning(self, bin_size: int) -> None:
+        """Apply spatial binning (down-sampling) to spectral images.
+
+        Averages non-zero pixel intensities within each
+        (bin_size × bin_size) block.  Updates ``spectral_img`` and,
+        if present, ``spectral_img_interpolated`` in-place.
+
+        Parameters
+        ----------
+        bin_size : int
+            Side length of the binning block.  A value ≤ 1 is a no-op.
+        """
+        if bin_size <= 1:
+            return
+        if self.spectral_img is not None:
+            print(f"Applying {bin_size}×{bin_size} output binning (ignoring zeros)...")
+            self.spectral_img = _binning_2d_numba(self.spectral_img, bin_size)
+        if self.spectral_img_interpolated is not None:
+            print(f"Applying {bin_size}×{bin_size} binning to interpolated image...")
+            self.spectral_img_interpolated = _binning_2d_numba(
+                self.spectral_img_interpolated, bin_size)
+        print("Binning complete.")
 
 
 class SpectralReconNumba(SpectralRecon):
     """
     Numba-accelerated version of SpectralRecon.
     Inherits all business logic, only overriding the nested loops for speed.
+
+    Parameters
+    ----------
+    output_binning : int
+        Spatial down-sampling factor applied to the final batch result.
+        A value of 0 or 1 means no binning.  For example,
+        ``output_binning=2`` averages each 2×2 block of pixels (ignoring
+        zeros) and produces an image half the original size in each spatial
+        dimension.
+    **kwargs
+        All other keyword arguments are forwarded to ``SpectralRecon``.
     """
+
+    def __init__(self, *, output_binning: int = 0, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.output_binning = output_binning
 
     @staticmethod
     def _extract_paths(img_work: np.ndarray, num_lines: int, is_dark: bool, mask_width: int = 20) -> np.ndarray:
@@ -304,6 +407,14 @@ class SpectralReconNumba(SpectralRecon):
         else:
             return _expand_full_2d_numba(h, w, s, row_indices, spectral_bands)
 
+
+    def process_single(self, image_path: str) -> "SingleResult":
+        result = super().process_single(image_path)
+        if self.output_binning > 1:
+            print(f"Applying {self.output_binning}×{self.output_binning} output binning to single result...")
+            result.spectral_img = _binning_2d_numba(result.spectral_img, self.output_binning)
+            print("Binning complete.")
+        return result
 
     def process_batch(self, image_paths: list[str], method: str = "max") -> BatchResult:
         if not image_paths:
@@ -346,6 +457,10 @@ class SpectralReconNumba(SpectralRecon):
                                   num_images=len(image_paths),
                                   spectral_width=int(sw_arr[0]),
                                   accumulation_method=method)
+
+        # Apply output binning if configured
+        if self.output_binning > 1:
+            result.apply_output_binning(self.output_binning)
 
         return result
 

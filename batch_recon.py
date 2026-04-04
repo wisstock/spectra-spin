@@ -303,11 +303,11 @@ class SpectralRecon:
         Whether to use ``dist_up``/``dist_down`` directly.
     dist_up, dist_down : float or None
         Fixed distances from a light line to the dark boundaries.
-    interpolate_output : bool
-        If ``True``, ``process_batch`` will additionally produce an
-        interpolated spectral image (``spectral_img_interpolated``)
-        where zero-valued pixels are filled channel-by-channel via
-        ``scipy.interpolate.griddata``.
+    output_binning : int
+        Spatial down-sampling factor for the final reconstructed image.
+        A value of 0 or 1 means no binning.  For example,
+        ``output_binning=2`` averages each 2×2 block of pixels (ignoring
+        zeros) producing an image half the size in each spatial dimension.
 
     """
 
@@ -324,6 +324,7 @@ class SpectralRecon:
         dist_up: Optional[float] = None,
         dist_down: Optional[float] = None,
         precise_allocation: bool = False,
+        output_binning: int = 0,
     ) -> None:
         self.crop = crop
         self.spectral_band_width = spectral_band_width
@@ -336,6 +337,7 @@ class SpectralRecon:
         self.dist_up = dist_up
         self.dist_down = dist_down
         self.precise_allocation = precise_allocation
+        self.output_binning = output_binning
 
 
     @staticmethod
