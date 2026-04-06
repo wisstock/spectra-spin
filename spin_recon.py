@@ -842,6 +842,13 @@ class SpectralRecon:
         else:
             return _expand_full_2d_numba(
                 h, w, s, row_indices, spectral_bands)
+        
+    @staticmethod
+    def binning_2d(spectral_img, output_binning):
+        """Apply 2D binning to the spectral image, enveloping the Numba kernel function.
+        
+        """
+        return _binning_2d(spectral_img, output_binning)
 
     # Instance pipeline methods
 
@@ -1028,20 +1035,22 @@ class SpectralRecon:
             image, reg_lines, self.spectral_band_width)
 
         if self.precise_allocation:
-            row_idx, used_bands = self.allocate_spectral_pixels_precise(
-                image, reg_lines, bands)
+            row_idx, used_bands = self.allocate_spectral_pixels_precise(image,
+                                                                        reg_lines,
+                                                                        bands)
         else:
-            row_idx, used_bands = self.allocate_spectral_pixels(
-                image, reg_lines, bands)
+            row_idx, used_bands = self.allocate_spectral_pixels(image,
+                                                                reg_lines,
+                                                                bands)
         del bands
 
         spectral_img = self.expand_to_full(
             image.shape[:2], row_idx, used_bands)
 
         if self.output_binning > 1:
-            logger.info("Applying %d×%d output binning to single result...",
+            logger.info("Applying %dx%d output binning to single result...",
                         self.output_binning, self.output_binning)
-            spectral_img = _binning_2d(spectral_img, self.output_binning)
+            spectral_img = self.binning_2d(spectral_img, self.output_binning)
             logger.info("Binning complete.")
 
         return SingleResult(
