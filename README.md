@@ -26,6 +26,7 @@ This project provides tools for extracting per-pixel spectral information from r
   - [`SpectralRecon`](#class-spectralrecon)
   - [`SingleResult`](#dataclass-singleresult)
   - [`BatchResult`](#dataclass-batchresult)
+- [Spectral Analysis Demo](#spectral-analysis-demo)
 - [Project Structure](#project-structure)
 - [AI Disclaimer](#ai-disclaimer)
 
@@ -343,17 +344,52 @@ Returned by `SpectralRecon.process_batch()`.
 
 ---
 
+## Spectral Analysis Demo
+
+The notebook `demo_spec_analysis.ipynb` demonstrates the downstream analysis of reconstructed spectral images using the data provided in the `demo_data/` directory.
+
+### Demo Data (`demo_data/`)
+This directory contains sample inputs required to run the analysis:
+- **`spec_img_recon.tiff`**: Full 3D reconstructed hyperspectral image `(S, H, W)` with interpolation.
+- **`spec_img_mip_raw.tiff` / `spec_img_mip_inter.tiff`**: Maximum Intensity Projections (MIP) of raw and interpolated spectral images.
+- **`spec_img_roi.tiff`**: Labeled image mask defining specific Regions of Interest (ROIs).
+- **`spec_data_raw.csv` / `spec_data_inter.csv`**: Pre-extracted spectral profiles for the labeled ROIs.
+- **`synthetic_test.tiff`**: Synthetic data for testing detection.
+
+### Analysis Pipeline
+The notebook walks through several stages of spectral data analysis:
+
+#### 1. ROI Spectral Fitting
+Spectra from individual ROIs are analyzed by fitting a sum of multiple Gaussian functions. The algorithm detects initial peak candidates using second-derivative minima and then refines the fit (`scipy.optimize.curve_fit`) to extract amplitude, position (mean), and width (sigma) for each peak.
+
+#### 2. Lambda Mapping (Calibration)
+The index positions of the fitted Gaussian peaks are correlated with expected physical emission wavelengths (e.g., 525 nm, 585 nm, 659 nm) to compute a linear spectral calibration (mapping pixels/indices to nanometers).
+
+#### 3. Spectral Isotropy Estimation (Numba Accelerated)
+To evaluate the uniformity of the spectral signal across the entire image on a per-pixel basis, a high-performance Numba-accelerated pipeline is used. Since the number of peaks per pixel varies (typically 1 to 3 due to the nature of the sample), relying solely on peak position ratios is unstable. Instead, the notebook computes robust metrics:
+
+- **Robust Peak Detection**: The raw pixel spectrum is smoothed using a Triangle (Bartlett) kernel. Peaks are detected based on topological **prominence** (to ignore noise) and their positions are refined with sub-pixel accuracy using an intensity-weighted centroid in a local window.
+- **Metric 1: Spectral Centroid**: The overall intensity-weighted "center of mass" of the pixel's spectrum. This metric is robust and computes a valid value even if distinct peaks cannot be resolved.
+- **Metric 2: Peak Spacing CV (Coefficient of Variation)**: For pixels with 2 or more peaks, this metric calculates the standard deviation of the distances between adjacent peaks divided by their mean. A value close to 0 indicates perfectly uniform spacing.
+- **Metric 3: EMD (Earth Mover's Distance)**: The pixel's normalized spectrum is compared against a reference distribution (the median spectrum of the entire image). EMD robustly quantifies how much "work" is required to transform the pixel's spectrum into the reference shape, serving as a stable anomaly/isotropy score.
+
+The notebook concludes by visualizing these metrics as 2D spatial maps and distribution histograms.
+
+---
+
 ## Project Structure
 
-```
+```text
 spectra-spin/
-├── spin_recon.py       # Primary module - SpectralRecon (Numba-accelerated)
-├── batch_recon.py      # Legacy - NumPy/SciPy implementation
-├── batch_numba.py      # Legacy - Numba add-on to batch_recon
-├── demo_recon.ipynb    # Reconstruction demo & benchmarks
-├── demo_dev.ipynb      # Development notebook
-├── data/               # Sample datasets (TIFF images)
-└── README.md           # This file
+├── spin_recon.py            # Primary module - SpectralRecon (Numba-accelerated)
+├── batch_recon.py           # Legacy - NumPy/SciPy implementation
+├── batch_numba.py           # Legacy - Numba add-on to batch_recon
+├── demo_recon.ipynb         # Reconstruction demo & benchmarks
+├── demo_spec_analysis.ipynb # Spectral analysis and isotropy estimation demo
+├── demo_dev.ipynb           # Development notebook
+├── demo_data/               # Data for the spectral analysis demo
+├── data/                    # Sample datasets (TIFF images)
+└── README.md                # This file
 ```
 
 ---
