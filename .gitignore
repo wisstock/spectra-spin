@@ -3,8 +3,7 @@ diff/
 
 # data
 data/
-*.tif
-*.tiff
+output/
 
 #metadata
 *.npz

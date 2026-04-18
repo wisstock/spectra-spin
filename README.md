@@ -2,7 +2,11 @@
 
 Batch spectral image reconstruction from **spinning-disk spectral microscopy** data.
 
-This project provides tools for extracting per-pixel spectral information from raw camera frames captured through a modified spinning-disk confocal.  A series of 2D monochrome images is analysed to detect periodic structures, isolate individual aperture bands, and assemble them into a single 3D hyperspectral data `(height, width, spectral_channels)`.
+This project provides tools for extracting per-pixel spectral information from raw camera frames captured through a modified spinning-disk confocal.  A series of 2D monochrome images is analysed to detect periodic structures, isolate individual spectral bands, and assemble them into a single 3D hyperspectral data `(height, width, spectral_channels)`.
+
+> Results presenting on Focus on Microscopy 2026 (Stockholm)
+>
+> __High-efficiency Hyperspectral Spinning Disk Confocal Microscopy via FPGA-Synchronized Prism Dispersion__
 
 ---
 
