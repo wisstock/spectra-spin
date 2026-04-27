@@ -1,5 +1,7 @@
 # Spectra-Spin
 
+[![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/banner-direct-team.svg)](https://stand-with-ukraine.pp.ua)
+
 Batch spectral image reconstruction from **spinning-disk spectral microscopy** data.
 
 This project provides tools for extracting per-pixel spectral information from raw camera frames captured through a modified spinning-disk confocal.  A series of 2D monochrome images is analysed to detect periodic structures, isolate individual spectral bands, and assemble them into a single 3D hyperspectral data `(height, width, spectral_channels)`.
@@ -26,6 +28,7 @@ This project provides tools for extracting per-pixel spectral information from r
   - [`SpectralRecon`](#class-spectralrecon)
   - [`SingleResult`](#dataclass-singleresult)
   - [`BatchResult`](#dataclass-batchresult)
+- [Spinning Disk Simulation](#spinning-disk-simulation)
 - [Spectral Analysis Demo](#spectral-analysis-demo)
 - [Project Structure](#project-structure)
 - [AI Disclaimer](#ai-disclaimer)
@@ -103,7 +106,7 @@ flowchart TD
 
 A **Prewitt filter** along the vertical axis (`axis=0`) is applied to the raw image to enhance horizontal intensity transitions - the boundaries between spectral bands:
 
-```
+```python
 edge_image = prewitt(image, axis=0)
 ```
 
@@ -344,6 +347,20 @@ Returned by `SpectralRecon.process_batch()`.
 
 ---
 
+## Spinning Disk Simulation
+
+The `disk_simulation.ipynb` notebook provides a comprehensive physical and optical simulation of the Yokogawa CSU-10 spinning disk spectral module. It models the data acquisition process to generate synthetic test data that matches the features of real recordings. 
+
+Key aspects of the simulation include:
+- **Nipkow Disk Models:** Detailed geometric modelling of the Yokogawa CSU-10 spinning disk architecture, including pinhole arrangement and spacing.
+- **Acquisition Simulation:** Emulation of camera integration across various disk rotational phases, simulating both continuous and discrete exposure schemes.
+- **Spectral Imaging Phases Modeling:** Simulating the distribution and displacement of spectral bands (both demo phase imaging and whole phase set scenarios).
+- **SIM Pattern Modeling:** Modeling structured illumination patterns inherent to spinning-disk architectures and assessing their influence on the reconstructed spectral spatial frequencies.
+
+This model allows for extensive theoretical validation of the `spin_recon.py` algorithms without requiring physical microscope access.
+
+---
+
 ## Spectral Analysis Demo
 
 The notebook `demo_spec_analysis.ipynb` demonstrates the downstream analysis of reconstructed spectral images using the data provided in the `demo_data/` directory.
@@ -387,8 +404,10 @@ spectra-spin/
 ├── demo_recon.ipynb         # Reconstruction demo & benchmarks
 ├── demo_spec_analysis.ipynb # Spectral analysis and isotropy estimation demo
 ├── demo_dev.ipynb           # Development notebook
+├── disk_simulation.ipynb    # Physical simulation of Yokogawa CSU-10
 ├── demo_data/               # Data for the spectral analysis demo
 ├── data/                    # Sample datasets (TIFF images)
+├── diff/                    # Legacy files and versions
 └── README.md                # This file
 ```
 
